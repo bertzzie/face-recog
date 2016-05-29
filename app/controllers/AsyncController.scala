@@ -50,7 +50,8 @@ class AsyncController @Inject()(actorSystem: ActorSystem, ws: WSClient)(implicit
         val timeout  = Timeout(120 seconds)
         val response = Await.result(emotionAPIResponse, 120 seconds)
 
-        Ok(response.scores.bestScore).withHeaders("Access-Control-Allow-Origin" -> "*")
+        Ok(Json.obj("emotion" -> response.scores.bestScore, "face" -> response.faceRectangle))
+          .withHeaders("Access-Control-Allow-Origin" -> "*")
 
       case _ => BadRequest("File unreadable").withHeaders("Access-Control-Allow-Origin" -> "*")
     }.getOrElse {
