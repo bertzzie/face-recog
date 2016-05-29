@@ -15,6 +15,6 @@ case class FaceScores(anger: Double,
     Map(
       "anger" -> anger, "contempt" -> contempt, "disgust" -> disgust, "fear" -> fear,
       "happiness" -> happiness, "neutral" -> neutral, "sadness" -> sadness, "surprise" -> surprise
-    ).max._1
+    ).maxBy(_._2)._1
   }
 }

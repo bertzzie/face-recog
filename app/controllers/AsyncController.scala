@@ -2,9 +2,16 @@ package controllers
 
 import akka.actor.ActorSystem
 import javax.inject._
+
+import akka.util.Timeout
+import models.{EmotionAPIResponse, FaceAPIResponse, FaceRectangle}
 import play.api._
+import play.api.libs.Files
+import play.api.libs.json.{JsError, JsSuccess, Json}
+import play.api.libs.ws.{StreamedBody, WSClient}
 import play.api.mvc._
-import scala.concurrent.{ExecutionContext, Future, Promise}
+
+import scala.concurrent.{Await, ExecutionContext, Future, Promise}
 import scala.concurrent.duration._
 
 /**
@@ -18,24 +25,63 @@ import scala.concurrent.duration._
  * asynchronous code.
  */
 @Singleton
-class AsyncController @Inject() (actorSystem: ActorSystem)(implicit exec: ExecutionContext) extends Controller {
+class AsyncController @Inject()(actorSystem: ActorSystem, ws: WSClient)(implicit exec: ExecutionContext) extends Controller {
+  def analyzeFace = Action(parse.multipartFormData) { request =>
+    request.body.file("face").map {
+      case picture: MultipartFormData.FilePart[Files.TemporaryFile] =>
+        val file = picture.ref.file
 
-  /**
-   * Create an Action that returns a plain text message after a delay
-   * of 1 second.
-   *
-   * The configuration in the `routes` file means that this method
-   * will be called when the application receives a `GET` request with
-   * a path of `/message`.
-   */
-  def message = Action.async {
-    getFutureMessage(1.second).map { msg => Ok(msg) }
+        val emotionAPIResponse = for {
+          far <- faceAPI(file)
+          ear <- emotionAPI(file, far.faceRectangle)
+        } yield ear
+
+        val timeout  = Timeout(120 seconds)
+        val response = Await.result(emotionAPIResponse, 120 seconds)
+
+        Ok(response.scores.bestScore)
+
+      case _ => BadRequest("File unreadable")
+    }.getOrElse {
+      BadRequest("Invalid file")
+    }
   }
 
-  private def getFutureMessage(delayTime: FiniteDuration): Future[String] = {
-    val promise: Promise[String] = Promise[String]()
-    actorSystem.scheduler.scheduleOnce(delayTime) { promise.success("Hi!") }
-    promise.future
+  def faceAPI(file: java.io.File): Future[FaceAPIResponse] = {
+    Logger.info("Calling Face API")
+    ws.url("https://api.projectoxford.ai/face/v1.0/detect")
+      .withHeaders(
+        "Ocp-Apim-Subscription-Key" -> "85b7f914ef2d4525b6853376dd01fd77",
+        "Content-Type"              -> "application/octet-stream"
+      )
+      .post(file)
+      .map { response =>
+        Logger.info("Face API returned:")
+        Logger.info(response.json.toString)
+        response.json.validate[Seq[FaceAPIResponse]] match {
+          case success: JsSuccess[Seq[FaceAPIResponse]] => success.get.head
+          case error: JsError                      => throw new Exception(error.errors.toString)
+        }
+      }
   }
 
+  def emotionAPI(file: java.io.File, fr: FaceRectangle) = {
+    val url = s"https://api.projectoxford.ai/emotion/v1.0/recognize?faceRectangles=${fr.left.toInt},${fr.top.toInt},${fr.width.toInt},${fr.height.toInt}"
+    Logger.info("Calling emotion API with URL:")
+    Logger.info(url)
+    ws.url(url)
+      .withHeaders(
+        "Ocp-Apim-Subscription-Key" -> "5991c47b21b24974b5e96a9e8bba2add",
+        "Content-Type"              -> "application/octet-stream"
+      )
+      .post(file)
+      .map { response =>
+        Logger.info("Face API returned:")
+        Logger.info(response.json.toString)
+        response.json.validate[Seq[EmotionAPIResponse]] match {
+          case success: JsSuccess[Seq[EmotionAPIResponse]] => success.get.head
+          case error: JsError => throw new Exception(error.errors.toString)
+        }
+      }
+  }
 }
