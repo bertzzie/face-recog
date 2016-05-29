@@ -26,6 +26,17 @@ import scala.concurrent.duration._
  */
 @Singleton
 class AsyncController @Inject()(actorSystem: ActorSystem, ws: WSClient)(implicit exec: ExecutionContext) extends Controller {
+  def allowCrossOrigin = Action.async { request =>
+    Future.successful {
+      Ok.withHeaders(
+        "Access-Control-Allow-Origin"  -> "*",
+        "Access-Control-Allow-Methods" -> "POST",
+        "Access-Control-Allow-Headers" -> "*",
+        "Access-Control-Max-Age"       -> "1728000"
+      )
+    }
+  }
+
   def analyzeFace = Action(parse.multipartFormData) { request =>
     request.body.file("face").map {
       case picture: MultipartFormData.FilePart[Files.TemporaryFile] =>
@@ -39,11 +50,11 @@ class AsyncController @Inject()(actorSystem: ActorSystem, ws: WSClient)(implicit
         val timeout  = Timeout(120 seconds)
         val response = Await.result(emotionAPIResponse, 120 seconds)
 
-        Ok(response.scores.bestScore)
+        Ok(response.scores.bestScore).withHeaders("Access-Control-Allow-Origin" -> "*")
 
-      case _ => BadRequest("File unreadable")
+      case _ => BadRequest("File unreadable").withHeaders("Access-Control-Allow-Origin" -> "*")
     }.getOrElse {
-      BadRequest("Invalid file")
+      BadRequest("Invalid file").withHeaders("Access-Control-Allow-Origin" -> "*")
     }
   }
 
